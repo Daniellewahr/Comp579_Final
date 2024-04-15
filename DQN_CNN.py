@@ -98,7 +98,7 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
                 scores.append(game.score())  # Collect score
                 if it % 20 == 0 and it > 0:  # Every 100 epochs, calculate and print the mean score
                     mean_score = sum(scores[-20:]) / 20
-                    print("Epoch: {}, Mean score last 100 epochs: {:.2f}".format(it, mean_score))
+                    print("Epoch: {}, Mean score last 20 epochs: {:.2f}".format(it, mean_score))
                 # print("Epoch: {}, Game score: {}".format(it, game.score()))
                 return
             #game.print_state()

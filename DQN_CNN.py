@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 import random
 from game import Game  # Assuming this is the correct import from your game environment
+import matplotlib.pyplot as plt  # Import matplotlib for plotting
 
 
 def one_hot_encode_game_state(game_state):
@@ -31,6 +32,7 @@ def one_hot_encode_game_state(game_state):
 
 class Net(nn.Module):
     def __init__(self, input_shape, num_actions):
+        
         super(Net, self).__init__()
         # Ensuring that both convolutional paths produce the same output dimensions
         self.conv1_1 = nn.Conv2d(input_shape[0], 32, kernel_size=3, stride=1, padding=1)
@@ -57,7 +59,7 @@ class Net(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the tensor
         return self.fc(x)
 
-def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
+def train_game(game, it, batch_size, gamma, optimizer, criterion, device, epsilon=0.2):
     global losses
     global scores  # Introducing a new variable to accumulate scores
     batch_outputs = []  # Tensors list for outputs
@@ -70,8 +72,18 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
 
         Q_values = model(state_tensor)
         Q_valid_values = [Q_values[0][a] if game.is_action_available(a) else float('-inf') for a in range(4)]
-        best_action = np.argmax(Q_valid_values)
-        reward = game.do_action(best_action)
+        
+        # Decide on an action based on epsilon-greedy
+        if np.random.rand() < epsilon:
+            # Choose a random action from the available actions
+            available_actions = [a for a in range(4) if game.is_action_available(a)]
+            best_action = np.random.choice(available_actions)
+        else:
+            best_action = np.argmax(Q_valid_values)
+
+
+        reward = 1
+        game.do_action(best_action)
         Q_star = Q_values[0][best_action]  # Directly use the Q value from the tensor
 
         new_state = game.state()
@@ -93,6 +105,7 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
+            #print(f"losses: {losses}")
 
             if game.game_over():
                 scores.append(game.score())  # Collect score
@@ -105,10 +118,12 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
         step += 1
 
 def eval_game(game, n_eval, device):
+    print("Starting Eval")
     global model
     total_score = 0
 
-    for _ in range(n_eval):
+    for i in range(n_eval):
+        print(f"Iteration {i}")
         game = Game()
         while not game.game_over():
             state = one_hot_encode_game_state(game.state())  # convert into one-hot
@@ -135,7 +150,7 @@ if __name__=="__main__":
     gamma = 1  # Discount factor
     n_epoch = 1000
     n_eval = 100
-    SEED = 1
+    SEED = 12
 
     # Set random seeds for reproducibility
     random.seed(SEED)
@@ -155,12 +170,21 @@ if __name__=="__main__":
     randoms = []
     game = Game()
     
-
+    
     model.train()
     for it in range(n_epoch):
         game = Game()  # Replace with actual game initialization
         train_game(game, it, batch_size, gamma, optimizer, criterion, device)
-        
+
+    # Plotting the training loss
+    plt.figure(figsize=(10, 5))
+    plt.plot(losses, label='Training Loss')
+    plt.title('Training Loss per Batch')
+    plt.xlabel('Batch Number')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
     test_games = 100
     mean_score_eval = eval_game(game, test_games, device)

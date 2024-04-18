@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 import random
 from game import Game  # Assuming this is the correct import from your game environment
+import matplotlib.pyplot as plt
 
 
 def one_hot_encode_game_state(game_state):
@@ -32,9 +33,15 @@ def one_hot_encode_game_state(game_state):
 class Net(nn.Module):
     def __init__(self, input_shape, num_actions):
         super(Net, self).__init__()
-        # Ensuring that both convolutional paths produce the same output dimensions
         self.conv1_1 = nn.Conv2d(input_shape[0], 32, kernel_size=3, stride=1, padding=1)
         self.conv1_2 = nn.Conv2d(input_shape[0], 64, kernel_size=3, stride=1, padding=1)
+        # self.conv1 = nn.Conv2d(input_shape[0], 32, kernel_size=3, stride=1, padding=1)
+        # self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        # self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        # self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
+        # self.conv1 = nn.Conv2d(1, 128, kernel_size=(2, 2))
+        # self.conv2 = nn.Conv2d(128, 128, kernel_size=(2, 2))
+
 
         # Calculate the correct size after convolution without assuming manual sizes
         linear_input_size = self._get_conv_output(input_shape)
@@ -48,8 +55,16 @@ class Net(nn.Module):
     def _forward_conv(self, x):
         x1 = torch.relu(self.conv1_1(x))
         x2 = torch.relu(self.conv1_2(x))
-        x = torch.cat((x1, x2), 1)  # Should now be able to concatenate without error
+        x = torch.cat((x1, x2), 1) 
         return x
+        # x1 = torch.relu(self.conv1(x))
+        # x2 = torch.relu(self.conv2(x1))
+        # x3 = torch.relu(self.conv3(x2))
+        # x4 = torch.relu(self.conv4(x3))
+        # return x4
+        # x = self.conv1(x)
+        # x = self.conv2(x)
+        # return x
 
     def forward(self, x):
         x = self._forward_conv(x)
@@ -57,7 +72,15 @@ class Net(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the tensor
         return self.fc(x)
 
-def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
+def epsilon_greedy_action(Q_values, epsilon=0.05):
+    if random.random() < epsilon:
+        # Randomly select an action
+        return random.randint(0, len(Q_values) - 1)
+    else:
+        # Select the action with the highest Q-value
+        return np.argmax(Q_values)
+
+def train_game(game, it, batch_size, gamma, optimizer, criterion, device, model):
     global losses
     global scores  # Introducing a new variable to accumulate scores
     batch_outputs = []  # Tensors list for outputs
@@ -70,9 +93,12 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
 
         Q_values = model(state_tensor)
         Q_valid_values = [Q_values[0][a] if game.is_action_available(a) else float('-inf') for a in range(4)]
-        best_action = np.argmax(Q_valid_values)
-        reward = game.do_action(best_action)
-        Q_star = Q_values[0][best_action]  # Directly use the Q value from the tensor
+        action = epsilon_greedy_action(np.array(Q_valid_values))
+        # best_action = np.argmax(np.array(Q_valid_values))
+        # reward = game.do_action(best_action)
+        reward = game.do_action(action)
+        # Q_star = Q_values[0][best_action]  # Directly use the Q value from the tensor
+        Q_star = Q_values[0][action]  # Directly use the Q value from the tensor
 
         new_state = game.state()
         new_state_tensor = one_hot_encode_game_state(new_state).unsqueeze(0).permute(0, 3, 1, 2).to(device)
@@ -96,16 +122,15 @@ def train_game(game, it, batch_size, gamma, optimizer, criterion, device):
 
             if game.game_over():
                 scores.append(game.score())  # Collect score
-                if it % 20 == 0 and it > 0:  # Every 100 epochs, calculate and print the mean score
-                    mean_score = sum(scores[-20:]) / 20
-                    print("Epoch: {}, Mean score last 20 epochs: {:.2f}".format(it, mean_score))
+                if it % 100 == 0 and it > 0:  # Every 100 epochs, calculate and print the mean score
+                    mean_score = sum(scores[-100:]) / 100
+                    print("Epoch: {}, Mean score last 100 epochs: {:.2f}".format(it, mean_score))
                 # print("Epoch: {}, Game score: {}".format(it, game.score()))
                 return
             #game.print_state()
         step += 1
 
-def eval_game(game, n_eval, device):
-    global model
+def eval_game(game, n_eval, device, model):
     total_score = 0
 
     for _ in range(n_eval):
@@ -126,14 +151,12 @@ def eval_game(game, n_eval, device):
     mean_score = total_score / n_eval  # Calculate the mean score over all evaluated games
     return mean_score
 
-
-
 if __name__=="__main__":
     input_shape = (16, 4, 4)  # Replace with the actual shape of the game state
     num_actions = 4  # Replace with the actual number of actions in the game
     batch_size = 128
     gamma = 1  # Discount factor
-    n_epoch = 1000
+    n_epoch = 1500
     n_eval = 100
     SEED = 1
 
@@ -147,21 +170,38 @@ if __name__=="__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = Net(input_shape, num_actions).to(device)
-    optimizer = optim.Adam(model.parameters())
+    learning_rate = 0.00001
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss().to(device)
 
     losses = []
     scores = []
     randoms = []
+    highest_tiles = []
     game = Game()
     
-
     model.train()
     for it in range(n_epoch):
         game = Game()  # Replace with actual game initialization
-        train_game(game, it, batch_size, gamma, optimizer, criterion, device)
+        train_game(game, it, batch_size, gamma, optimizer, criterion, device, model)
+        highest_tiles.append(game.max_tile())
         
+    test_games = 1000
+    mean_score_eval = eval_game(game, test_games, device, model)
+    print(f"The mean of the scores across {test_games} evaluation games is {mean_score_eval}")
 
-    test_games = 100
-    mean_score_eval = eval_game(game, test_games, device)
-    print(f"The mean of the scores across {test_games} games is {mean_score_eval}")
+    # After the training loop
+    plt.plot(scores)
+    plt.xlabel('Epoch')
+    plt.ylabel('Score')
+    plt.title('Training Scores over Epochs')
+    plt.show()  
+    plt.close()
+
+    plt.scatter(range(len(highest_tiles)), highest_tiles, label='Highest Tile', marker='o', color='b')
+    plt.xlabel('Epoch')
+    plt.ylabel('Tile Value')
+    plt.title('Highest Tile Reached over Epochs')
+    plt.legend()
+    plt.show()
+    plt.close()
